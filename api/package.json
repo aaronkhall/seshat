@@ -1,0 +1,20 @@
+{
+  "name": "@seshat/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,23 @@
+# Seshat — local/Coolify multi-service stack.
+# The web container (nginx) serves the SPA and proxies /api to the api container,
+# so tile API keys never leave the server and there are no CORS issues.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      API_PORT: 8787
+      THUNDERFOREST_API_KEY: ${THUNDERFOREST_API_KEY:-}
+      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY:-}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
