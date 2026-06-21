@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { route, activeEngine, type Profile } from './routing';
 
 // Load repo-root .env (running cwd is api/ under npm workspaces) without a dep.
 for (const p of ['../.env', '.env']) {
@@ -35,6 +36,42 @@ app.get('/api/keys', async () => ({
   thunderforest: Boolean(TF_KEY),
   openweathermap: Boolean(OWM_KEY),
 }));
+
+// Capabilities the web app needs to know about (e.g. which routing engine is live —
+// surface coloring is only available from GraphHopper).
+app.get('/api/config', async () => ({ routingEngine: activeEngine() }));
+
+// Snap waypoints to the network and return a normalized route.
+const PROFILES = new Set<Profile>(['bike', 'foot', 'car']);
+app.post<{ Body: { profile?: string; points?: unknown; elevation?: boolean } }>(
+  '/api/route',
+  async (req, reply) => {
+    const { profile, points, elevation } = req.body ?? {};
+    if (!profile || !PROFILES.has(profile as Profile)) {
+      return reply.code(400).send({ error: 'profile must be bike, foot or car' });
+    }
+    if (
+      !Array.isArray(points) ||
+      points.length < 2 ||
+      !points.every(
+        (p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number'),
+      )
+    ) {
+      return reply.code(400).send({ error: 'points must be >=2 [lng,lat] pairs' });
+    }
+    try {
+      const result = await route({
+        profile: profile as Profile,
+        points: points as [number, number][],
+        elevation: elevation ?? true,
+      });
+      return result;
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(502).send({ error: 'routing failed', detail: String(err) });
+    }
+  },
+);
 
 const NUM = /^\d{1,2}$/;
 const COORD = /^\d{1,7}$/;

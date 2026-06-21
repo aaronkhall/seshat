@@ -1,0 +1,47 @@
+# GraphHopper config for Seshat — cycle / walk / drive with elevation + surface.
+# The api reads surface/road_class/smoothness path details to colour routes.
+graphhopper:
+  datareader.file: ""           # set via the import command (-i /data/region.osm.pbf)
+  graph.location: /data/graph-cache
+
+  # Elevation — gives the route response native elevation (no separate DEM call).
+  graph.elevation.provider: srtm
+  graph.elevation.cache_dir: /data/elevation-cache
+
+  # Encoded values the api requests as path details.
+  graph.encoded_values: surface, road_class, road_environment, smoothness, max_speed, bike_network, foot_network
+
+  profiles:
+    - name: bike
+      weighting: custom
+      custom_model:
+        priority:
+          - if: "true"
+            multiply_by: "0.9"
+      vehicle: bike
+    - name: foot
+      weighting: custom
+      custom_model: {}
+      vehicle: foot
+    - name: car
+      weighting: custom
+      custom_model: {}
+      vehicle: car
+
+  # Speed mode (CH) for fast routing. Drop these to use only flexible mode if you
+  # want per-request custom models (paved/gravel/avoid-hills) without a rebuild.
+  profiles_ch:
+    - profile: bike
+    - profile: foot
+    - profile: car
+
+  import.osm.ignored_highways: ""
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: 0.0.0.0

@@ -12,6 +12,10 @@ import {
   makePresetId,
   type Preset,
 } from './map/presets';
+import { usePlanner } from './planner/usePlanner';
+import { PlannerPanel } from './planner/PlannerPanel';
+import { ElevationChart } from './planner/ElevationChart';
+import { pointAtDistance } from './planner/geo';
 
 const DEFAULT_STACK: ActiveLayer[] = [{ defId: 'opentopomap', opacity: 1, visible: true }];
 
@@ -24,8 +28,11 @@ export default function App() {
   });
   const [flyTo, setFlyTo] = useState<{ lng: number; lat: number } | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [planning, setPlanning] = useState(false);
+  const [routingEngine, setRoutingEngine] = useState('osrm');
+  const planner = usePlanner();
 
-  // Ask the api which keyed sources are configured.
+  // Ask the api which keyed sources are configured + which routing engine is live.
   useEffect(() => {
     fetch('/api/keys')
       .then((r) => (r.ok ? r.json() : null))
@@ -33,7 +40,16 @@ export default function App() {
       .catch(() => {
         /* api not running — keyed layers stay disabled */
       });
+    fetch('/api/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.routingEngine && setRoutingEngine(d.routingEngine))
+      .catch(() => {});
   }, []);
+
+  const hoverPoint = useMemo(
+    () => (planner.hoverDist != null ? pointAtDistance(planner.route, planner.hoverDist) : null),
+    [planner.route, planner.hoverDist],
+  );
 
   const radarActive = stack.some((s) => s.defId === 'rainviewer-radar' && s.visible);
   const rv = useRainViewer(radarActive);
@@ -82,7 +98,17 @@ export default function App() {
 
   return (
     <div className="cg-app">
-      <MapView stack={stack} dynamicTiles={dynamicTiles} flyTo={flyTo} />
+      <MapView
+        stack={stack}
+        dynamicTiles={dynamicTiles}
+        flyTo={flyTo}
+        planning={planning}
+        waypoints={planner.waypoints}
+        route={planner.route}
+        hoverPoint={hoverPoint}
+        onMapClick={planner.addPoint}
+        onWaypointDragEnd={planner.movePoint}
+      />
 
       <div className="cg-topbar">
         <button
@@ -93,9 +119,16 @@ export default function App() {
           ☰
         </button>
         <Geocoder onSelect={(r) => setFlyTo({ lng: r.lng, lat: r.lat })} />
+        <button
+          className={`cg-plan-toggle${planning ? ' active' : ''}`}
+          onClick={() => setPlanning((p) => !p)}
+          title="Route planner"
+        >
+          {planning ? '✕ Close planner' : '✎ Plan route'}
+        </button>
       </div>
 
-      {panelOpen && (
+      {panelOpen && !planning && (
         <LayerManager
           stack={stack}
           availability={availability}
@@ -110,6 +143,18 @@ export default function App() {
           onSavePreset={savePreset}
           onDeletePreset={deletePreset}
         />
+      )}
+
+      {planning && <PlannerPanel planner={planner} routingEngine={routingEngine} />}
+
+      {planning && planner.route && (
+        <div className="cg-elev-bar">
+          <ElevationChart
+            route={planner.route}
+            hoverDist={planner.hoverDist}
+            onHover={planner.setHoverDist}
+          />
+        </div>
       )}
     </div>
   );

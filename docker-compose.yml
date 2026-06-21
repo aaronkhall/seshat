@@ -10,6 +10,23 @@ services:
       API_PORT: 8787
       THUNDERFOREST_API_KEY: ${THUNDERFOREST_API_KEY:-}
       OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY:-}
+      # Empty -> api uses keyless public OSRM. Set to the graphhopper service for
+      # native elevation + surface (start it with: docker compose --profile routing up).
+      GRAPHHOPPER_URL: ${GRAPHHOPPER_URL:-}
+    restart: unless-stopped
+
+  # Self-hosted routing. Off by default (heavy). Enable with --profile routing once
+  # you've placed an OSM extract at infra/graphhopper/data/region.osm.pbf (see infra/README.md).
+  graphhopper:
+    image: graphhopper/graphhopper:latest
+    profiles: ["routing"]
+    command: >
+      --input /data/region.osm.pbf
+      --config /data/config.yml
+      --host 0.0.0.0
+    volumes:
+      - ./infra/graphhopper/config.yml:/data/config.yml:ro
+      - ./infra/graphhopper/data:/data
     restart: unless-stopped
 
   web:
