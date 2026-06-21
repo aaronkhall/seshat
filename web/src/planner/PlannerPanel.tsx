@@ -87,8 +87,8 @@ export function PlannerPanel({ planner, routingEngine }: PlannerPanelProps) {
       )}
 
       <p className="cg-engine-note">
-        engine: {routingEngine}
-        {routingEngine !== 'graphhopper' && ' · surface colouring needs self-hosted GraphHopper'}
+        routing: {route ? route.engine : routingEngine === 'hybrid' ? 'GraphHopper in AU, OSRM elsewhere' : routingEngine}
+        {route && route.engine === 'osrm' && ' · no surface/native elevation outside the GraphHopper region'}
       </p>
     </div>
   );

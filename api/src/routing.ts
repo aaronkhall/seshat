@@ -37,6 +37,23 @@ export interface NormalizedRoute {
 }
 
 const GRAPHHOPPER_URL = process.env.GRAPHHOPPER_URL ?? '';
+
+// Region the self-hosted GraphHopper graph covers. Points inside use GraphHopper
+// (native elevation + surface); anything outside (or crossing the edge) uses public
+// OSRM. Override with GRAPHHOPPER_BBOX="w,s,e,n". Default is Australia (incl. Tasmania).
+const DEFAULT_AU_BBOX: [number, number, number, number] = [112, -44, 154, -9];
+function parseBbox(s: string | undefined): [number, number, number, number] | null {
+  if (!s) return null;
+  const p = s.split(',').map(Number);
+  return p.length === 4 && p.every((n) => Number.isFinite(n))
+    ? [p[0], p[1], p[2], p[3]]
+    : null;
+}
+const GRAPHHOPPER_BBOX = parseBbox(process.env.GRAPHHOPPER_BBOX) ?? DEFAULT_AU_BBOX;
+
+function withinBbox(points: [number, number][], [w, s, e, n]: [number, number, number, number]): boolean {
+  return points.every(([lng, lat]) => lng >= w && lng <= e && lat >= s && lat <= n);
+}
 // FOSSGIS public OSRM — one host per profile, keyless. Dev fallback.
 const OSRM_HOSTS: Record<Profile, string> = {
   bike: 'https://routing.openstreetmap.de/routed-bike',
@@ -46,8 +63,14 @@ const OSRM_HOSTS: Record<Profile, string> = {
 // Public DEM for elevation enrichment when the engine has none.
 const OPENTOPODATA = 'https://api.opentopodata.org/v1/mapzen';
 
-export function activeEngine(): string {
-  return GRAPHHOPPER_URL ? 'graphhopper' : 'osrm';
+/** What the client should know about routing: 'hybrid' (GH in-region, OSRM elsewhere) or 'osrm'. */
+export function routingInfo(): {
+  routingEngine: string;
+  selfHostedBbox: [number, number, number, number] | null;
+} {
+  return GRAPHHOPPER_URL
+    ? { routingEngine: 'hybrid', selfHostedBbox: GRAPHHOPPER_BBOX }
+    : { routingEngine: 'osrm', selfHostedBbox: null };
 }
 
 const R = 6371000;
@@ -213,5 +236,14 @@ async function sampleElevation(coords: [number, number][]): Promise<{ dist: numb
 
 export async function route(req: RouteRequest): Promise<NormalizedRoute> {
   if (req.points.length < 2) throw new Error('need at least 2 points');
-  return GRAPHHOPPER_URL ? routeGraphHopper(req) : routeOSRM(req);
+  // Use self-hosted GraphHopper only when every point is inside its region.
+  if (GRAPHHOPPER_URL && withinBbox(req.points, GRAPHHOPPER_BBOX)) {
+    try {
+      return await routeGraphHopper(req);
+    } catch {
+      // GraphHopper down or can't route here — fall back to public OSRM.
+      return routeOSRM(req);
+    }
+  }
+  return routeOSRM(req);
 }

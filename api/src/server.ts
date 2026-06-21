@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { route, activeEngine, type Profile } from './routing';
+import { route, routingInfo, type Profile } from './routing';
 
 // Load repo-root .env (running cwd is api/ under npm workspaces) without a dep.
 for (const p of ['../.env', '.env']) {
@@ -37,9 +37,9 @@ app.get('/api/keys', async () => ({
   openweathermap: Boolean(OWM_KEY),
 }));
 
-// Capabilities the web app needs to know about (e.g. which routing engine is live —
-// surface coloring is only available from GraphHopper).
-app.get('/api/config', async () => ({ routingEngine: activeEngine() }));
+// Capabilities the web app needs to know about — routing mode ('hybrid' = GraphHopper
+// in its region, OSRM elsewhere) and the self-hosted bounding box.
+app.get('/api/config', async () => routingInfo());
 
 // Snap waypoints to the network and return a normalized route.
 const PROFILES = new Set<Profile>(['bike', 'foot', 'car']);

@@ -7,6 +7,19 @@ development and light use, but no native elevation/surface and subject to fair-u
 limits. For the real experience (native elevation + **surface colouring**, custom
 "prefer paved / avoid hills" models), self-host GraphHopper.
 
+### Hybrid routing (GraphHopper in your region, OSRM worldwide)
+
+You don't need a planet build. Set `GRAPHHOPPER_URL` and import just the region(s)
+you ride. Routing then picks the engine **per request**:
+
+- every waypoint inside `GRAPHHOPPER_BBOX` → **GraphHopper** (elevation + surface)
+- any point outside, or a route crossing the boundary → **public OSRM**
+- GraphHopper unreachable/can't route → automatic OSRM fallback
+
+`GRAPHHOPPER_BBOX` defaults to Australia (`112,-44,154,-9`). Set it to match your
+extract. `GET /api/config` reports `{"routingEngine":"hybrid", "selfHostedBbox":[...]}`,
+and each route response carries the `engine` that actually produced it.
+
 ### 1. Get an OSM extract
 
 Download the region(s) you ride from [Geofabrik](https://download.geofabrik.de/)
