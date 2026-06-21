@@ -12,6 +12,11 @@ services:
     environment:
       EXTRACT_URL: https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
       CROP_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
+    # Homelab firewall blocks public DNS (8.8.8.8 etc.); use the LAN Technitium
+    # resolvers or external downloads fail. See references/homelab-dns.md.
+    dns:
+      - 192.168.3.10
+      - 192.168.3.40
     volumes:
       - gh-data:/data
     restart: "no"
@@ -25,6 +30,9 @@ services:
       # Keep the heap modest — this VM is RAM-tight. Import is the one-time peak;
       # steady-state serving for a metro-region graph is ~1-1.5 GB.
       JAVA_OPTS: -Xmx2200m -Xms512m
+    dns: # LAN resolvers for SRTM elevation tile downloads (see references/homelab-dns.md)
+      - 192.168.3.10
+      - 192.168.3.40
     command:
       - -c
       - /data/config.yml
@@ -48,6 +56,9 @@ services:
       # Hybrid: GraphHopper inside this bbox, public OSRM elsewhere.
       GRAPHHOPPER_URL: http://graphhopper:8989
       GRAPHHOPPER_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
+    dns: # LAN resolvers for OSRM + elevation API calls (see references/homelab-dns.md)
+      - 192.168.3.10
+      - 192.168.3.40
     restart: unless-stopped
 
   web:
