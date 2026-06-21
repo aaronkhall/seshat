@@ -1,65 +1,49 @@
 # Infra
 
-## Routing engine (GraphHopper) — optional, for production-quality routing
+## Routing — hybrid GraphHopper (SE Queensland) + OSRM worldwide
 
-By default the api uses the **keyless public OSRM** servers (FOSSGIS) — fine for
-development and light use, but no native elevation/surface and subject to fair-use
-limits. For the real experience (native elevation + **surface colouring**, custom
-"prefer paved / avoid hills" models), self-host GraphHopper.
+Routing picks the engine per request (see `api/src/routing.ts`):
 
-### Hybrid routing (GraphHopper in your region, OSRM worldwide)
+- every waypoint inside `GRAPHHOPPER_BBOX` → **self-hosted GraphHopper** (native
+  elevation + surface colouring)
+- anything outside, or a route crossing the boundary → **public OSRM** (keyless)
+- GraphHopper unreachable / can't route → automatic OSRM fallback
 
-You don't need a planet build. Set `GRAPHHOPPER_URL` and import just the region(s)
-you ride. Routing then picks the engine **per request**:
+The deployed stack (`docker-compose.yml`) self-hosts GraphHopper for **SE Queensland**
+only — the homelab is RAM-tight, and a regional graph builds + serves in ~1.5–2.5 GB
+where a full-Australia build needs 4–6 GB. The rest of the world routes via OSRM.
 
-- every waypoint inside `GRAPHHOPPER_BBOX` → **GraphHopper** (elevation + surface)
-- any point outside, or a route crossing the boundary → **public OSRM**
-- GraphHopper unreachable/can't route → automatic OSRM fallback
+### How GraphHopper is built (automatic)
 
-`GRAPHHOPPER_BBOX` defaults to Australia (`112,-44,154,-9`). Set it to match your
-extract. `GET /api/config` reports `{"routingEngine":"hybrid", "selfHostedBbox":[...]}`,
-and each route response carries the `engine` that actually produced it.
+Two services handle it, no manual download needed:
 
-### 1. Get an OSM extract
+1. **`gh-prep`** (one-shot) — downloads the `australia-oceania` extract from Geofabrik
+   and crops it to `GRAPHHOPPER_BBOX` with `osmium extract`, into the `gh-data` volume.
+   Idempotent: skips if the cropped `region.osm.pbf` already exists, so redeploys don't
+   re-download the ~1.4 GB file. The source is deleted after cropping to save disk.
+2. **`graphhopper`** (`israelhikingmap/graphhopper` — there is no official image) —
+   waits for `gh-prep`, imports `region.osm.pbf`, and serves on `:8989`. SRTM elevation
+   tiles + the built graph are cached in `gh-data` so restarts are fast. Heap is capped
+   via `JAVA_OPTS` (`-Xmx2200m`) to fit the VM.
 
-Download the region(s) you ride from [Geofabrik](https://download.geofabrik.de/)
-and save as `infra/graphhopper/data/region.osm.pbf`:
+### Changing the region
 
-```bash
-mkdir -p infra/graphhopper/data
-# Example — Australia (~1.5 GB). Pick your region; smaller = faster build, less RAM.
-curl -L https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf \
-  -o infra/graphhopper/data/region.osm.pbf
-```
+Set `GRAPHHOPPER_BBOX` (env, `left,bottom,right,top`). It is used **both** to crop the
+extract and to tell the api where GraphHopper is authoritative — keep them identical.
+Default SE-QLD: `151.5,-28.5,153.6,-26.3` (Brisbane, Gold Coast, Sunshine Coast,
+Toowoomba/Ipswich hinterland). To widen, raise the heap and check the VM has the RAM.
 
-> **Global note:** a planet build needs ~32–64 GB RAM. Self-host the continents you
-> actually use; the api falls back to public OSRM outside the self-hosted region.
-> For true planet self-hosting on modest hardware, swap GraphHopper for Valhalla
-> (tile-based, low RAM) — it's a contained change to the `routing` service + the
-> `routeGraphHopper` adapter in `api/src/routing.ts`.
-
-### 2. Build the graph + run
-
-```bash
-docker compose --profile routing up graphhopper   # first run imports the pbf (minutes)
-```
-
-The graph cache lands in `infra/graphhopper/data/graph-cache` (gitignored). Later
-runs start fast.
-
-### 3. Point the api at it
-
-```bash
-# .env (repo root)
-GRAPHHOPPER_URL=http://graphhopper:8989   # in docker compose
-# or http://localhost:8989 when running the api on the host
-```
-
-Restart the api. `GET /api/config` should now report `{"routingEngine":"graphhopper"}`
-and routes will include elevation + surface spans.
+> **Full Australia** needs ~4–6 GB during import — more than the current homelab hosts
+> have free. Add physical RAM (or run GraphHopper on a bigger box and point
+> `GRAPHHOPPER_URL` at it) before widening the bbox to the whole country. For true
+> planet self-hosting on modest RAM, swap GraphHopper for Valhalla (tile-based) — a
+> contained change to the `graphhopper` service + the `routeGraphHopper` adapter.
 
 ## Coolify
 
-Deploy the compose stack. The `web` (nginx) service proxies `/api` to `api`, so tile
-keys stay server-side and there's no CORS. Add the `routing` profile + a persistent
-volume for `infra/graphhopper/data` if you self-host GraphHopper there.
+Deployed as a **Docker Compose** application on the `homelab` project, server `localhost`.
+`web` binds host port **8091** (no domain) — reach it at `http://192.168.3.51:8091`.
+`api`/`graphhopper`/`gh-prep` are internal to the compose network. Tile API keys
+(`THUNDERFOREST_API_KEY`, `OPENWEATHERMAP_API_KEY`) are set as Coolify env vars and
+stay server-side. The `gh-data` volume persists the OSM region + built graph across
+redeploys.

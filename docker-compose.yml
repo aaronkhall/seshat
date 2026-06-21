@@ -1,7 +1,42 @@
-# Seshat — local/Coolify multi-service stack.
-# The web container (nginx) serves the SPA and proxies /api to the api container,
-# so tile API keys never leave the server and there are no CORS issues.
+# Seshat — production stack (Coolify / docker compose).
+# web (nginx) serves the SPA and proxies /api to the api container, so tile keys
+# stay server-side and there's no CORS. Hybrid routing: GraphHopper for SE Queensland
+# (gh-prep crops the AU extract to a bbox, graphhopper builds + serves it), public
+# OSRM everywhere else.
 services:
+  # One-shot: download the AU extract and crop to the SE-QLD bbox into the volume.
+  gh-prep:
+    build:
+      context: .
+      dockerfile: infra/graphhopper/prep.Dockerfile
+    environment:
+      EXTRACT_URL: https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
+      CROP_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
+    volumes:
+      - gh-data:/data
+    restart: "no"
+
+  graphhopper:
+    image: israelhikingmap/graphhopper:latest
+    depends_on:
+      gh-prep:
+        condition: service_completed_successfully
+    environment:
+      # Keep the heap modest — this VM is RAM-tight. Import is the one-time peak;
+      # steady-state serving for a metro-region graph is ~1-1.5 GB.
+      JAVA_OPTS: -Xmx2200m -Xms512m
+    command:
+      - -c
+      - /data/config.yml
+      - -Ddw.graphhopper.datareader.file=/data/region.osm.pbf
+      - -Ddw.graphhopper.graph.location=/data/graph-cache
+      - --host
+      - 0.0.0.0
+    volumes:
+      - gh-data:/data
+      - ./infra/graphhopper/config.yml:/data/config.yml:ro
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -10,31 +45,20 @@ services:
       API_PORT: 8787
       THUNDERFOREST_API_KEY: ${THUNDERFOREST_API_KEY:-}
       OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY:-}
-      # Empty -> api uses keyless public OSRM. Set to the graphhopper service for
-      # native elevation + surface (start it with: docker compose --profile routing up).
-      GRAPHHOPPER_URL: ${GRAPHHOPPER_URL:-}
-    restart: unless-stopped
-
-  # Self-hosted routing. Off by default (heavy). Enable with --profile routing once
-  # you've placed an OSM extract at infra/graphhopper/data/region.osm.pbf (see infra/README.md).
-  graphhopper:
-    image: graphhopper/graphhopper:latest
-    profiles: ["routing"]
-    command: >
-      --input /data/region.osm.pbf
-      --config /data/config.yml
-      --host 0.0.0.0
-    volumes:
-      - ./infra/graphhopper/config.yml:/data/config.yml:ro
-      - ./infra/graphhopper/data:/data
+      # Hybrid: GraphHopper inside this bbox, public OSRM elsewhere.
+      GRAPHHOPPER_URL: http://graphhopper:8989
+      GRAPHHOPPER_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
     restart: unless-stopped
 
   web:
     build:
       context: .
       dockerfile: web/Dockerfile
-    ports:
-      - "8080:80"
     depends_on:
       - api
+    ports:
+      - "8091:80"
     restart: unless-stopped
+
+volumes:
+  gh-data:

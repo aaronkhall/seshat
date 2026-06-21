@@ -1,41 +1,38 @@
-# GraphHopper config for Seshat — cycle / walk / drive with elevation + surface.
-# The api reads surface/road_class/smoothness path details to colour routes.
+# GraphHopper config for Seshat — car / bike / foot with SRTM elevation + surface.
+# Format is GraphHopper v11 (custom_model_files + encoded values, not the old
+# vehicle:/weighting: style). datareader.file + graph.location come from -D flags
+# in the compose command. Image: israelhikingmap/graphhopper (no official image exists).
 graphhopper:
-  datareader.file: ""           # set via the import command (-i /data/region.osm.pbf)
+  datareader.file: ""
   graph.location: /data/graph-cache
 
-  # Elevation — gives the route response native elevation (no separate DEM call).
-  graph.elevation.provider: srtm
-  graph.elevation.cache_dir: /data/elevation-cache
-
-  # Encoded values the api requests as path details.
-  graph.encoded_values: surface, road_class, road_environment, smoothness, max_speed, bike_network, foot_network
-
   profiles:
-    - name: bike
-      weighting: custom
-      custom_model:
-        priority:
-          - if: "true"
-            multiply_by: "0.9"
-      vehicle: bike
-    - name: foot
-      weighting: custom
-      custom_model: {}
-      vehicle: foot
     - name: car
-      weighting: custom
-      custom_model: {}
-      vehicle: car
+      custom_model_files: [car.json]
+    - name: bike
+      custom_model_files: [bike.json, bike_elevation.json]
+    - name: foot
+      custom_model_files: [foot.json, foot_elevation.json]
 
-  # Speed mode (CH) for fast routing. Drop these to use only flexible mode if you
-  # want per-request custom models (paved/gravel/avoid-hills) without a rebuild.
+  # Speed mode (CH) only for car; bike/foot run flexible (cheaper prep, RAM-friendly).
   profiles_ch:
-    - profile: bike
-    - profile: foot
     - profile: car
+  profiles_lm: []
 
+  # Encoded values required by the built-in bike/foot/elevation custom models.
+  # surface + road_class are listed so the api can request them as path details
+  # (this is what drives the route's surface colouring).
+  graph.encoded_values: road_class, road_environment, max_speed, road_access, surface, smoothness, roundabout, average_slope, car_access, car_average_speed, bike_access, bike_average_speed, bike_priority, bike_network, foot_access, foot_average_speed, foot_priority, hike_rating, mtb_rating, country
+
+  # Elevation (SRTM) — cached on the mounted volume so it survives restarts.
+  graph.elevation.provider: srtm
+  graph.elevation.cache_dir: /data/srtm-cache
+  graph.elevation.dataaccess: RAM_STORE
+
+  graph.dataaccess.default_type: RAM_STORE
+  # Keep footway/cycleway/path so bike + foot can route (default drops them).
   import.osm.ignored_highways: ""
+
 server:
   application_connectors:
     - type: http
