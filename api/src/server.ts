@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import dns from 'node:dns/promises';
+import fs from 'node:fs';
 import { route, routingInfo, type Profile } from './routing';
 
 // Load repo-root .env (running cwd is api/ under npm workspaces) without a dep.
@@ -40,6 +42,31 @@ app.get('/api/keys', async () => ({
 // Capabilities the web app needs to know about — routing mode ('hybrid' = GraphHopper
 // in its region, OSRM elsewhere) and the self-hosted bounding box.
 app.get('/api/config', async () => routingInfo());
+
+// Temporary diagnostic: what resolver does this container use, and can it resolve
+// + reach an external host? Remove once egress is confirmed.
+app.get<{ Querystring: { host?: string } }>('/api/debug/net', async (req) => {
+  const host = req.query.host || 'routing.openstreetmap.de';
+  const out: Record<string, unknown> = { host };
+  try {
+    out.resolvConf = fs.readFileSync('/etc/resolv.conf', 'utf8');
+  } catch (e) {
+    out.resolvConfError = String(e);
+  }
+  try {
+    out.resolved = await dns.resolve4(host);
+  } catch (e) {
+    out.dnsError = String((e as Error).message || e);
+  }
+  try {
+    const r = await fetch('https://' + host, { method: 'HEAD' });
+    out.fetchStatus = r.status;
+  } catch (e) {
+    const err = e as { cause?: { code?: string } };
+    out.fetchError = err?.cause?.code || String((e as Error).message || e);
+  }
+  return out;
+});
 
 // Snap waypoints to the network and return a normalized route.
 const PROFILES = new Set<Profile>(['bike', 'foot', 'car']);
