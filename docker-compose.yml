@@ -1,50 +1,12 @@
-# Seshat — production stack (Coolify / docker compose).
+# Seshat — Coolify deploy stack (web + api).
 # web (nginx) serves the SPA and proxies /api to the api container, so tile keys
-# stay server-side and there's no CORS. Hybrid routing: GraphHopper for SE Queensland
-# (gh-prep crops the AU extract to a bbox, graphhopper builds + serves it), public
-# OSRM everywhere else.
+# stay server-side and there's no CORS. Routing uses public OSRM worldwide.
+#
+# Self-hosted GraphHopper (SE-QLD, native elevation + surface) is a SEPARATE stack
+# in docker-compose.graphhopper.yml — kept out of the default deploy because it needs
+# more RAM headroom than the current VM has. Bring it up alongside once RAM allows,
+# then set GRAPHHOPPER_URL/GRAPHHOPPER_BBOX on the api. See infra/README.md.
 services:
-  # One-shot: download the AU extract and crop to the SE-QLD bbox into the volume.
-  gh-prep:
-    build:
-      context: .
-      dockerfile: infra/graphhopper/prep.Dockerfile
-    environment:
-      EXTRACT_URL: https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
-      CROP_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
-    # Homelab firewall blocks public DNS (8.8.8.8 etc.); use the LAN Technitium
-    # resolvers or external downloads fail. See references/homelab-dns.md.
-    dns:
-      - 192.168.3.10
-      - 192.168.3.40
-    volumes:
-      - gh-data:/data
-    restart: "no"
-
-  graphhopper:
-    image: israelhikingmap/graphhopper:latest
-    depends_on:
-      gh-prep:
-        condition: service_completed_successfully
-    environment:
-      # Keep the heap modest — this VM is RAM-tight. Import is the one-time peak;
-      # steady-state serving for a metro-region graph is ~1-1.5 GB.
-      JAVA_OPTS: -Xmx2200m -Xms512m
-    dns: # LAN resolvers for SRTM elevation tile downloads (see references/homelab-dns.md)
-      - 192.168.3.10
-      - 192.168.3.40
-    command:
-      - -c
-      - /data/config.yml
-      - -Ddw.graphhopper.datareader.file=/data/region.osm.pbf
-      - -Ddw.graphhopper.graph.location=/data/graph-cache
-      - --host
-      - 0.0.0.0
-    volumes:
-      - gh-data:/data
-      - ./infra/graphhopper/config.yml:/data/config.yml:ro
-    restart: unless-stopped
-
   api:
     build:
       context: .
@@ -53,10 +15,12 @@ services:
       API_PORT: 8787
       THUNDERFOREST_API_KEY: ${THUNDERFOREST_API_KEY:-}
       OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY:-}
-      # Hybrid: GraphHopper inside this bbox, public OSRM elsewhere.
-      GRAPHHOPPER_URL: http://graphhopper:8989
-      GRAPHHOPPER_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
-    dns: # LAN resolvers for OSRM + elevation API calls (see references/homelab-dns.md)
+      # Empty -> public OSRM worldwide. Point at a running GraphHopper to enable hybrid.
+      GRAPHHOPPER_URL: ${GRAPHHOPPER_URL:-}
+      GRAPHHOPPER_BBOX: ${GRAPHHOPPER_BBOX:-}
+    # Homelab firewall blocks public DNS; use LAN Technitium resolvers for OSRM +
+    # elevation egress. See references/homelab-dns.md.
+    dns:
       - 192.168.3.10
       - 192.168.3.40
     restart: unless-stopped
@@ -70,6 +34,3 @@ services:
     ports:
       - "8091:80"
     restart: unless-stopped
-
-volumes:
-  gh-data:

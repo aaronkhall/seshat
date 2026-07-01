@@ -1,0 +1,49 @@
+# Self-hosted GraphHopper for SE Queensland — SEPARATE from the main deploy because
+# the graph import peaks at ~2+ GB and the current Coolify VM doesn't have that free.
+# Bring it up on a host with RAM headroom:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.graphhopper.yml up -d
+#
+# then set on the api: GRAPHHOPPER_URL=http://graphhopper:8989 and
+# GRAPHHOPPER_BBOX=151.5,-28.5,153.6,-26.3 (routing becomes hybrid: GraphHopper in
+# SE-QLD, OSRM elsewhere). See infra/README.md.
+services:
+  # One-shot: download the AU extract and crop to the SE-QLD bbox into the volume.
+  gh-prep:
+    build:
+      context: .
+      dockerfile: infra/graphhopper/prep.Dockerfile
+    environment:
+      EXTRACT_URL: https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
+      CROP_BBOX: ${GRAPHHOPPER_BBOX:-151.5,-28.5,153.6,-26.3}
+    dns: # LAN resolvers — see references/homelab-dns.md
+      - 192.168.3.10
+      - 192.168.3.40
+    volumes:
+      - gh-data:/data
+    restart: "no"
+
+  graphhopper:
+    image: israelhikingmap/graphhopper:latest
+    depends_on:
+      gh-prep:
+        condition: service_completed_successfully
+    environment:
+      JAVA_OPTS: -Xmx2200m -Xms512m
+    dns:
+      - 192.168.3.10
+      - 192.168.3.40
+    command:
+      - -c
+      - /data/config.yml
+      - -Ddw.graphhopper.datareader.file=/data/region.osm.pbf
+      - -Ddw.graphhopper.graph.location=/data/graph-cache
+      - --host
+      - 0.0.0.0
+    volumes:
+      - gh-data:/data
+      - ./infra/graphhopper/config.yml:/data/config.yml:ro
+    restart: unless-stopped
+
+volumes:
+  gh-data:
