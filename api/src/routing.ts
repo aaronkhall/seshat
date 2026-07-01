@@ -36,7 +36,13 @@ export interface NormalizedRoute {
   surfaces: SurfaceSpan[];
 }
 
-const GRAPHHOPPER_URL = process.env.GRAPHHOPPER_URL ?? '';
+// GraphHopper: either a self-hosted instance (GRAPHHOPPER_URL) or the public
+// Directions API (GRAPHHOPPER_KEY). With a key, GraphHopper is used WORLDWIDE
+// (elevation + surface everywhere); the self-hosted path is regional (bbox) + OSRM.
+const GRAPHHOPPER_KEY = process.env.GRAPHHOPPER_KEY ?? '';
+const GRAPHHOPPER_PUBLIC = 'https://graphhopper.com/api/1';
+const GRAPHHOPPER_URL =
+  process.env.GRAPHHOPPER_URL || (GRAPHHOPPER_KEY ? GRAPHHOPPER_PUBLIC : '');
 
 // Region the self-hosted GraphHopper graph covers. Points inside use GraphHopper
 // (native elevation + surface); anything outside (or crossing the edge) uses public
@@ -63,14 +69,14 @@ const OSRM_HOSTS: Record<Profile, string> = {
 // Public DEM for elevation enrichment when the engine has none.
 const OPENTOPODATA = 'https://api.opentopodata.org/v1/mapzen';
 
-/** What the client should know about routing: 'hybrid' (GH in-region, OSRM elsewhere) or 'osrm'. */
+/** What the client should know: 'graphhopper' (worldwide, via key), 'hybrid' (GH in-region + OSRM), or 'osrm'. */
 export function routingInfo(): {
   routingEngine: string;
   selfHostedBbox: [number, number, number, number] | null;
 } {
-  return GRAPHHOPPER_URL
-    ? { routingEngine: 'hybrid', selfHostedBbox: GRAPHHOPPER_BBOX }
-    : { routingEngine: 'osrm', selfHostedBbox: null };
+  if (GRAPHHOPPER_KEY) return { routingEngine: 'graphhopper', selfHostedBbox: null };
+  if (GRAPHHOPPER_URL) return { routingEngine: 'hybrid', selfHostedBbox: GRAPHHOPPER_BBOX };
+  return { routingEngine: 'osrm', selfHostedBbox: null };
 }
 
 const R = 6371000;
@@ -127,7 +133,8 @@ async function routeGraphHopper(req: RouteRequest): Promise<NormalizedRoute> {
     instructions: false,
     details: ['surface', 'road_class'],
   };
-  const res = await fetch(`${GRAPHHOPPER_URL}/route`, {
+  const url = `${GRAPHHOPPER_URL}/route${GRAPHHOPPER_KEY ? `?key=${GRAPHHOPPER_KEY}` : ''}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -236,12 +243,13 @@ async function sampleElevation(coords: [number, number][]): Promise<{ dist: numb
 
 export async function route(req: RouteRequest): Promise<NormalizedRoute> {
   if (req.points.length < 2) throw new Error('need at least 2 points');
-  // Use self-hosted GraphHopper only when every point is inside its region.
+  // Public GraphHopper API (key): use it worldwide — elevation + surface everywhere.
+  if (GRAPHHOPPER_KEY) return routeGraphHopper(req);
+  // Self-hosted GraphHopper: only when every point is inside its region, else OSRM.
   if (GRAPHHOPPER_URL && withinBbox(req.points, GRAPHHOPPER_BBOX)) {
     try {
       return await routeGraphHopper(req);
     } catch {
-      // GraphHopper down or can't route here — fall back to public OSRM.
       return routeOSRM(req);
     }
   }

@@ -15,7 +15,10 @@ services:
       API_PORT: 8787
       THUNDERFOREST_API_KEY: ${THUNDERFOREST_API_KEY:-}
       OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY:-}
-      # Empty -> public OSRM worldwide. Point at a running GraphHopper to enable hybrid.
+      # With GRAPHHOPPER_KEY set, routing uses the GraphHopper public API worldwide
+      # (elevation + surface). Empty key + empty URL -> public OSRM. A self-hosted
+      # URL (no key) -> hybrid GraphHopper-in-bbox + OSRM.
+      GRAPHHOPPER_KEY: ${GRAPHHOPPER_KEY:-}
       GRAPHHOPPER_URL: ${GRAPHHOPPER_URL:-}
       GRAPHHOPPER_BBOX: ${GRAPHHOPPER_BBOX:-}
     # Homelab firewall blocks public DNS; use LAN Technitium resolvers for OSRM +
